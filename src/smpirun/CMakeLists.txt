@@ -1,0 +1,1 @@
+INSTALL(PROGRAMS smpirun.py DESTINATION bin)
