@@ -37,6 +37,10 @@ CMakeFiles
 Makefile
 cmake_install.cmake
 install_manifest.txt
+build/*
 
 #VScode files
 .vscode
+
+#Mac files
+*.DS_Store

@@ -3,6 +3,7 @@ import sys
 import getopt
 import os
 import re
+from multiprocessing import Process
 
 def usage():
     print "usage: smpirun.py --hostfile=hosts exec"
@@ -19,9 +20,17 @@ def read_hostfile(filedir, hosts):
             if 'slots' in tmp_list:
                 id = tmp_list.index('slots')
                 if len(tmp_list) > id + 1 and tmp_list[id + 1].isdigit():
-                    process_num = tmp_list[id + 1]
+                    process_num = int(tmp_list[id + 1])
+            
+            if process_num != 1:
+                print "Now, only supports slots=1"
+                sys.exit()
             
             hosts.append((hostname, process_num))
+
+def launch_thread(ssh_cmd):
+    print ssh_cmd
+    os.system(ssh_cmd)
 
 def launch(hosts, exec_file, host_file):
     pwd = os.getcwd()
@@ -34,16 +43,28 @@ def launch(hosts, exec_file, host_file):
     if len(tmp_list) != 1:
         exec_absolute_path = exec_absolute_path + '/'
     print "exec = " + exec_absolute_path + exec_name
+    
+    size = 0
+    for host, process_num in hosts:
+        size = size + process_num
 
+    rank = 0
     for host, process_num in hosts:
         #copy the hostfile to other nodes
-        scp_cmd = 'scp {} {}:/tmp/'.format(host_file, host)
+        scp_cmd = 'scp {} {}:/tmp/hosts'.format(host_file, host)
         os.system(scp_cmd)
         print scp_cmd
-        for i in range(int(process_num)):
-            ssh_cmd = 'ssh {} \'cd {}; {}\''.format(host, exec_absolute_path, exec_name)
-            os.system(ssh_cmd)
-            print ssh_cmd
+        for i in range(process_num):
+            ssh_cmd = 'ssh {} \'cd {}; if [ -f {} ];then \
+                        ./{} --smpirank {} --smpisize {}; \
+                        else \
+                        {} --smpirank {} --smpisize {}; \
+                        fi\''.format(host, exec_absolute_path, exec_name, exec_name, str(rank), str(size), exec_name, str(rank), str(size))
+            
+            t = Process(target=launch_thread, args=(ssh_cmd,))
+            #t = threading.Thread(target=test_thread, args=(ssh_cmd,))
+            t.start()
+            rank = rank + 1
 
 
 hosts = []
