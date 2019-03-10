@@ -4,6 +4,7 @@
 #include <iostream>
 #include <string>
 #include <fstream>
+#include <cstring>
 
 static const int LISTEN_PORT = 23333;
 static const int MAX_HOST_NAME_OR_IP_LEN = 20;
@@ -13,12 +14,12 @@ int MPI_Init(int *argc, char ***argv)
 {
     //TODO : use getopt for arg
     for (int i = 0; i < *argc; ++i)
-        if (std::strcmp((*argv)[i], "--smpirank") == 0)
+        if (strcmp((*argv)[i], "--smpirank") == 0)
         {
             mainProc.setRank(atoi((*argv)[i+1]));
             printf("rank = %d\n", atoi((*argv)[i+1]));
         }
-        else if (std::strcmp((*argv)[i], "--smpisize") == 0)
+        else if (strcmp((*argv)[i], "--smpisize") == 0)
         {
             smpiCommSize = atoi((*argv)[i+1]);
             printf("size = %d\n", atoi((*argv)[i+1]));

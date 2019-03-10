@@ -1,11 +1,12 @@
 #include <proc.h>
-#include<sys/types.h>
-#include<sys/socket.h>
-#include<netinet/in.h>
-#include<unistd.h>
-#include<errno.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <errno.h>
 #include <netdb.h>
-#include<arpa/inet.h>
+#include <arpa/inet.h>
+#include <cstring>
 
 MainProc mainProc;
 int smpiCommSize = 0;
