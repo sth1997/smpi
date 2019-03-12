@@ -1,12 +1,13 @@
 #ifndef MPI_H
 #define MPI_H
 
+
+extern int smpiCommSize;
+
 enum MPI_Datatype
 {
-    MPI_CHAR,
     MPI_INT,
-    MPI_FLOAT,
-    MPI_DOUBLE
+    MPI_FLOAT
 };
 
 enum MPI_Comm
@@ -16,18 +17,26 @@ enum MPI_Comm
 
 enum MPI_Status
 {
-    MPI_STATUS_IGNORE
 };
+
+#define MPI_STATUS_IGNORE ((MPI_Status *) 0)
+#define MPI_STATUSES_IGNORE ((MPI_Status *) 0)
 
 int MPI_Init(int *argc, char ***argv);
 
 int MPI_Finalize(void);
+
+int MPI_Comm_size(MPI_Comm comm, int *size);
+
+int MPI_Comm_rank(MPI_Comm comm, int *rank);
 
 int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm);
 
 int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status);
 
 int MPI_Barrier(MPI_Comm comm);
+
+typedef int MPI_RET_CODE;
 
 #define MPI_SUCCESS                   0
 #define MPI_ERR_BUFFER                1
@@ -103,6 +112,10 @@ int MPI_Barrier(MPI_Comm comm);
 #define MPI_ERR_RMA_SHARED            71
 #define MPI_T_ERR_INVALID             72
 #define MPI_T_ERR_INVALID_NAME        73
+
+//SMPI defined
+#define MPI_ERR_NOT_INIT              74
+#define MPI_ERR_OVERFLOW              75
 
 
 #endif

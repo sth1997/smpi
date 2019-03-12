@@ -7,17 +7,9 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <cstring>
+#include <mpi.h>
 
 MainProc mainProc;
-int smpiCommSize = 0;
-
-Proc::Proc() : fd(-1), isHost(true)
-{
-}
-
-Proc::Proc(int tmpRank, int tmpFd, bool tmpIsHost) : rank(tmpRank), fd(tmpFd), isHost(tmpIsHost)
-{
-}
 
 Proc::~Proc()
 {
@@ -28,61 +20,13 @@ Proc::~Proc()
     }
 }
 
-/*const char* Proc::getIpAddr() const
+void Proc::clear()
 {
-    return this->ipAddr;
-}
-
-void Proc::setIpAddr(const char* c)
-{
-    memcpy(this->ipAddr, c, strlen(c));
-}
-
-int Proc::getPort() const
-{
-    return this->port;
-}
-void Proc::setPort(int tmpPort)
-{
-    this->port = tmpPort;
-}*/
-
-int Proc::getRank() const
-{
-    return this->rank;
-}
-
-void Proc::setRank(int tmpRank)
-{
-    this->rank = tmpRank;
-}
-
-int Proc::getFd() const
-{
-    return fd;
-}
-
-void Proc::setFd(int tmpFd)
-{
-    this->fd = tmpFd;
-}
-
-bool Proc::getIsHost() const
-{
-    return this->isHost;
-}
-
-void Proc::setIsHost(bool tmpIsHost)
-{
-    this->isHost = tmpIsHost;
-}
-
-MainProc::MainProc()
-{
-}
-
-MainProc::~MainProc()
-{
+    if (fd != -1)
+    {
+        close(fd);
+        fd = -1;
+    }
 }
 
 void MainProc::setup(int port)
@@ -90,7 +34,8 @@ void MainProc::setup(int port)
     int  listenfd;
     struct sockaddr_in  servaddr;
 
-    if( (listenfd = socket(AF_INET, SOCK_STREAM, 0)) == -1 ){
+    if( (listenfd = socket(AF_INET, SOCK_STREAM, 0)) == -1 )
+    {
         printf("create socket error: %s(errno: %d)\n",strerror(errno),errno);
         return;
     }
@@ -107,12 +52,14 @@ void MainProc::setup(int port)
 		return;
 	}
 
-    if( bind(listenfd, (struct sockaddr*) &servaddr, sizeof(servaddr)) == -1){
+    if( bind(listenfd, (struct sockaddr*) &servaddr, sizeof(servaddr)) == -1)
+    {
         printf("Rank%d : bind socket error: %s(errno: %d)\n",this->getRank(), strerror(errno),errno);
         return;
     }
 
-    if( listen(listenfd, smpiCommSize) == -1){
+    if( listen(listenfd, smpiCommSize) == -1)
+    {
         printf("listen socket error: %s(errno: %d)\n",strerror(errno),errno);
         return;
     }
@@ -126,7 +73,8 @@ void MainProc::connectToServer(const std::string& server, int port, int serverRa
     int sockfd;
     struct sockaddr_in  servaddr;
 
-    if( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+    if( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    {
         printf("create socket error: %s(errno: %d)\n", strerror(errno),errno);
         return;
     }
@@ -155,7 +103,8 @@ void MainProc::connectToServer(const std::string& server, int port, int serverRa
   	else
     	servaddr.sin_addr.s_addr = inet_addr(server.c_str());
 
-    while (connect(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) < 0){
+    while (connect(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) < 0)
+    {
         printf("Rank%d: connect error: %s(errno: %d)\n",this->getRank(), strerror(errno),errno);
         // Connection refused, maybe the server has not listened on the port.
         // Sleep for a while and try again.
@@ -168,7 +117,8 @@ void MainProc::connectToServer(const std::string& server, int port, int serverRa
             return;
     }
     int myRank = this->getRank();
-    if( send(sockfd, &myRank, sizeof(int), 0) < 0){
+    if( send(sockfd, &myRank, sizeof(int), 0) < 0)
+    {
         printf("send msg error: %s(errno: %d)\n", strerror(errno), errno);
         return;
     }
@@ -181,7 +131,8 @@ void MainProc::connectToServer(const std::string& server, int port, int serverRa
 void MainProc::acceptOneConnection()
 {
     int  connfd, listenfd = this->getFd();
-    if( (connfd = accept(listenfd, (struct sockaddr*)NULL, NULL)) == -1){
+    if( (connfd = accept(listenfd, (struct sockaddr*)NULL, NULL)) == -1)
+    {
         printf("accept socket error: %s(errno: %d)",strerror(errno),errno);
         return;
     }
@@ -205,4 +156,59 @@ void MainProc::acceptOneConnection()
         this->others.emplace_back(clientRank, connfd, clientIsHost);
     }
     printf("%d connect with %d\n", myRank, clientRank);
+}
+
+//Return -1 for invalid peerRank.
+int MainProc::getFdByRank(int peerRank) const
+{
+    for (auto &proc : others)
+        if (proc.getRank() == peerRank)
+            return proc.getFd();
+    if (peerRank == peer.getRank())
+        return peer.getFd();
+    printf("Can not find any fd by this rank. This rank may be invalid!\n");
+    return -1;
+}
+
+//Return sent bytes. Return -1 for error.
+ssize_t MainProc::sendBytes(const void* buf, size_t len, int peerRank) const
+{
+    //TODO : invalid TCP buffer(len(buf) > TCP buffer), split the buffer and send more times
+    int fd, sentBytes;
+    if ((fd = this->getFdByRank(peerRank)) == -1)
+        return -1;
+    if ((sentBytes = send(fd , buf, len, 0)) < 0)
+    {
+        printf("send msg error: %s(errno: %d)\n", strerror(errno), errno);
+        return -1;
+    }
+    else
+    {
+        return sentBytes;
+    }
+}
+
+//Return received bytes. Return -1 for error.
+ssize_t MainProc::recvBytes(void* buf, size_t len, int peerRank) const
+{
+    //TODO : invalid TCP buffer(len(buf) > TCP buffer), split the buffer and send more times
+    int fd, recvedBytes;
+    if ((fd = this->getFdByRank(peerRank)) == -1)
+        return -1;
+    if ((recvedBytes = recv(fd, buf, len, 0)) < 0)
+    {
+        printf("recv msg error: %s(errno: %d)\n", strerror(errno), errno);
+        return -1;
+    }
+    else
+    {
+        return recvedBytes;
+    }
+}
+
+void MainProc::clear()
+{
+    Proc::clear();
+    this->peer.clear();
+    others.clear();
 }

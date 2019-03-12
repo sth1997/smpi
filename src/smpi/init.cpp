@@ -9,6 +9,7 @@
 static const int LISTEN_PORT = 23333;
 static const int MAX_HOST_NAME_OR_IP_LEN = 20;
 
+int smpiCommSize = 0;
 
 int MPI_Init(int *argc, char ***argv)
 {
