@@ -26,4 +26,9 @@ MPI_RET_CODE checkInit();
 
 size_t getDataSize(MPI_Datatype datatype);
 
+int nextPowerOfTwoInclusive(int value);
+
+// Comm tag
+#define TAG_BARRIER 0
+
 #endif //COMMON_H

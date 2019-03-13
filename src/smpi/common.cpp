@@ -76,3 +76,11 @@ size_t getDataSize(MPI_Datatype datatype)
         }
     }
 }
+
+/* Find the nearest power of 2 of the communicator size. */
+int nextPowerOfTwoInclusive(int value)
+{
+    int power2;
+    for (power2 = 1 ; power2 < value; power2 <<= 1) /* empty */;
+    return power2;
+}

@@ -7,6 +7,7 @@ comm_size.cpp
 comm_rank.cpp
 send.cpp
 recv.cpp
+barrier.cpp
 )
 
 ADD_LIBRARY(smpi SHARED ${SOURCE_FILES})
