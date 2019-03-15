@@ -19,6 +19,11 @@ enum MPI_Status
 {
 };
 
+enum MPI_Op
+{
+    MPI_SUM
+};
+
 #define MPI_STATUS_IGNORE ((MPI_Status *) 0)
 #define MPI_STATUSES_IGNORE ((MPI_Status *) 0)
 
@@ -36,7 +41,11 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, M
 
 int MPI_Barrier(MPI_Comm comm);
 
+int MPI_Allreduce_Sparse(const void *sendbuf, void *recvbuf, int count, const int nonzeroCount, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm);
+
 typedef int MPI_RET_CODE;
+
+#define MPI_IN_PLACE             ((void *) 1)          /* in place buffer */
 
 #define MPI_SUCCESS                   0
 #define MPI_ERR_BUFFER                1
@@ -116,6 +125,7 @@ typedef int MPI_RET_CODE;
 //SMPI defined
 #define MPI_ERR_NOT_INIT              74
 #define MPI_ERR_OVERFLOW              75
+#define MPI_ERR_NULL_POINTER          76
 
 
 #endif

@@ -7,14 +7,10 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype,
 {
     int rc;
     CHECK_SMPI_SUCCESS(checkInit());
+    CHECK_SMPI_SUCCESS(checkPointerNotNULL(buf));
     CHECK_SMPI_SUCCESS(checkRankSupport(dest));
     CHECK_SMPI_SUCCESS(checkTagSupport(tag));
     CHECK_SMPI_SUCCESS(checkCommSupport(comm));
-    if (buf == NULL)
-    {
-        printf("MPI_Send with NULL pointer!\n");
-        return MPI_ERR_BUFFER;
-    }
 
     if (count <= 0)
     {

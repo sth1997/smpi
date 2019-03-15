@@ -11,11 +11,13 @@ int MPI_Barrier(MPI_Comm comm)
 {
     int rank, size, depth, jump, partner;
     int rc;
+    CHECK_SMPI_SUCCESS(checkInit());
+    CHECK_SMPI_SUCCESS(checkCommSupport(comm));
     CHECK_SMPI_SUCCESS(MPI_Comm_rank(comm, &rank));
     CHECK_SMPI_SUCCESS(MPI_Comm_size(comm, &size));
 
-    /* Find the nearest power of 2 of the communicator size. */
-    depth = nextPowerOfTwoInclusive(size);
+    /* Find the nearest power of 2 greater than or equal to the communicator size. */
+    depth = nextPowerOfTwoGE(size);
 
     for (jump=1; jump<depth; jump<<=1)
     {

@@ -61,6 +61,16 @@ MPI_RET_CODE checkInit()
     return MPI_SUCCESS;
 }
 
+MPI_RET_CODE checkPointerNotNULL(const void* p)
+{
+    if (p == NULL)
+    {
+        printf("Pointer should not be NULL!\n");
+        return MPI_ERR_NULL_POINTER;
+    }
+    return MPI_SUCCESS;
+}
+
 size_t getDataSize(MPI_Datatype datatype)
 {
     switch (datatype)
@@ -77,10 +87,35 @@ size_t getDataSize(MPI_Datatype datatype)
     }
 }
 
-/* Find the nearest power of 2 of the communicator size. */
-int nextPowerOfTwoInclusive(int value)
+/* Find the nearest power of 2 greater than or equal to this value*/
+int nextPowerOfTwoGE(int value)
 {
     int power2;
     for (power2 = 1 ; power2 < value; power2 <<= 1) /* empty */;
     return power2;
+}
+
+/* Find the nearest power of 2 greater than this value*/
+int nextPowerOfTwoGT(int value)
+{
+    int power2;
+    for (power2 = 1; power2 <= value; power2 <<= 1) /* empty */;
+    return power2;
+}
+
+// Return a buf with the start address aligned.
+void* mallocAlign(size_t numBytes, int align)
+{
+    char* p = (char*) malloc(numBytes + align);
+    if (p == NULL)
+        return NULL;
+    char* retp = p + align - ((unsigned long)p % align);
+    *(retp - 1) = retp - p;
+    return retp;
+}
+
+void freeAlign(char* p)
+{
+    void* realp = p - *(p - 1);
+    free(realp);
 }

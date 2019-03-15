@@ -24,11 +24,20 @@ MPI_RET_CODE checkMulOverflow(unsigned long count, size_t size);
 
 MPI_RET_CODE checkInit();
 
+MPI_RET_CODE checkPointerNotNULL(const void* p);
+
 size_t getDataSize(MPI_Datatype datatype);
 
-int nextPowerOfTwoInclusive(int value);
+int nextPowerOfTwoGE(int value);
+
+int nextPowerOfTwoGT(int value);
+
+void* mallocAlign(size_t numBytes, int align);
+
+void freeAlign(char* p);
 
 // Comm tag
 #define TAG_BARRIER 0
+#define TAG_ALLREDUCE_SPARSE 0
 
 #endif //COMMON_H
