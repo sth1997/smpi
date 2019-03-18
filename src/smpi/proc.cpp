@@ -9,6 +9,9 @@
 #include <cstring>
 #include <mpi.h>
 
+#define MAX_RECV_LEN 4096
+#define MAX_SEND_LEN 4096
+
 MainProc mainProc;
 
 Proc::~Proc()
@@ -195,15 +198,21 @@ ssize_t MainProc::recvBytes(void* buf, size_t len, int peerRank) const
     int fd, recvedBytes;
     if ((fd = this->getFdByRank(peerRank)) == -1)
         return -1;
-    if ((recvedBytes = recv(fd, buf, len, 0)) < 0)
+    size_t restLen = len;
+    while (restLen)
     {
-        printf("recv msg error: %s(errno: %d)\n", strerror(errno), errno);
-        return -1;
+        if ((recvedBytes = recv(fd, buf, (restLen < MAX_RECV_LEN) ? restLen : MAX_RECV_LEN, 0)) < 0)
+        {
+            printf("recv msg error: %s(errno: %d)\n", strerror(errno), errno);
+            return -1;
+        }
+        else
+        {
+            restLen -= recvedBytes;
+            buf = (char*) buf + recvedBytes;
+        }
     }
-    else
-    {
-        return recvedBytes;
-    }
+    return len;
 }
 
 void MainProc::clear()

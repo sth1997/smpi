@@ -20,11 +20,8 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype,
     }
     //TODO : invalid buffer(len(buf) < sizeof(datatype) * count)
 
-    //TODO : if overflow, split the buffer and recv more times
-    CHECK_SMPI_SUCCESS(checkMulOverflow((unsigned long) count, getDataSize(datatype)));
-
     ssize_t recvedBytes = mainProc.recvBytes(buf, count * getDataSize(datatype), source);
-    //TODO : this code may cause an error when count * getDataSize(datatype) > MAX_UNSIGNED_LONG / 2
+ 
     if (recvedBytes !=  count * getDataSize(datatype))
     {
         printf("MPI_Recv failed!  Received %ld bytes.\n", recvedBytes);
