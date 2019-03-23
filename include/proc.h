@@ -55,7 +55,8 @@ class MainProc: public Proc
 {
 public:
     MainProc() {}
-    ~MainProc() {}
+    ~MainProc();
+    bool havePeer() {return (peer.getFd() != -1);}
     void setup(int port);
     void connectToServer(const std::string &server, int port, int serverRank, bool serverIsHost);
     void acceptOneConnection();

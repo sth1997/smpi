@@ -1,4 +1,2 @@
-host11 slots=1
-host12 slots=1
-smartnic11 slots=1
-smartnic12 slots=1
+host11 slots=1 smartnic=smartnic11
+host12 slots=1 smartnic=smartnic12

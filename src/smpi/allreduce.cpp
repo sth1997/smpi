@@ -157,6 +157,124 @@ static MPI_RET_CODE sendrecv(const void *sendbuf, int sendNonzeroCount, void *re
     return MPI_SUCCESS;
 }
 
+/*
+ * The compressed data is stored in sbuf as input.
+ * The result which is also compressed is stored in resultBuf as output.
+ * Note, resultBuf must be sbuf or tmp_buf.
+ */
+MPI_RET_CODE allreduceSparse(char* sbuf, char* rbuf, char* tmp_buf, int size, int rank, int nonzeroCount, MPI_Datatype datatype, MPI_Comm comm, char* &resultBuf, int &retTotalNonzeroCount)
+{
+    char *tmpsend = NULL, *tmprecv = NULL, *tmpswap = NULL;
+    tmpsend = (char*) sbuf;
+    tmprecv = (char*) rbuf;
+    char* tmpadd = tmp_buf;
+
+    int newrank, newremote, extra_ranks, adjsize, remote, distance;
+    int rc;
+
+    adjsize = nextPowerOfTwoGT(size);
+    /* Determine nearest power of two less than or equal to size */
+    adjsize >>= 1;
+
+    /* Handle non-power-of-two case:
+       - Even ranks less than 2 * extra_ranks send their data to (rank + 1), and
+       sets new rank to -1.
+       - Odd ranks less than 2 * extra_ranks receive data from (rank - 1),
+       apply appropriate operation, and set new rank to rank/2
+       - Everyone else sets rank to rank - extra_ranks
+    */
+    extra_ranks = size - adjsize;
+    printf("extra rank = %d\n", extra_ranks);
+    int recvNonzeroCount, sendNonzeroCount = nonzeroCount;
+    if (rank <  (2 * extra_ranks)) {
+        if (0 == (rank & 1)) {
+            // TODO : Combine these two MPI_Send.
+            CHECK_SMPI_SUCCESS(MPI_Send(&sendNonzeroCount, 1, MPI_INT, (rank + 1),
+                                        TAG_ALLREDUCE_SPARSE, comm));
+            CHECK_SMPI_SUCCESS(MPI_Send(tmpsend, sendNonzeroCount * 2, datatype, (rank + 1),
+                                        TAG_ALLREDUCE_SPARSE, comm));
+            newrank = -1;
+        } else {
+            CHECK_SMPI_SUCCESS(MPI_Recv(&recvNonzeroCount, 1, MPI_INT, (rank - 1),
+                                    TAG_ALLREDUCE_SPARSE, comm, MPI_STATUS_IGNORE));
+            CHECK_SMPI_SUCCESS(MPI_Recv(tmprecv, recvNonzeroCount * 2, datatype, (rank - 1),
+                                    TAG_ALLREDUCE_SPARSE, comm, MPI_STATUS_IGNORE));
+            /* tmpsend = tmprecv (op) tmpsend */
+            int totalNonzeroCount;
+            CHECK_SMPI_SUCCESS(addSparse(tmpsend, tmprecv, tmpadd, sendNonzeroCount,
+                                        recvNonzeroCount, totalNonzeroCount, datatype));
+            tmpswap = tmpadd;
+            tmpadd = tmpsend;
+            tmpsend = tmpswap;
+            sendNonzeroCount = totalNonzeroCount;
+            newrank = rank >> 1;
+        }
+    } else {
+        newrank = rank - extra_ranks;
+    }
+
+    /* Communication/Computation loop
+       - Exchange message with remote node.
+       - Perform appropriate operation taking in account order of operations:
+       result = value (op) result
+    */
+    for (distance = 0x1; distance < adjsize; distance <<= 1) {
+        if (newrank < 0) break;
+        /* Determine remote node */
+        newremote = newrank ^ distance;
+        remote = (newremote < extra_ranks)?
+            (newremote * 2 + 1):(newremote + extra_ranks);
+
+        /* Exchange the data */
+        CHECK_SMPI_SUCCESS(sendrecv(tmpsend, sendNonzeroCount, tmprecv, recvNonzeroCount,
+                                    rank, remote, TAG_ALLREDUCE_SPARSE, datatype, comm));
+        
+        int totalNonzeroCount;
+        CHECK_SMPI_SUCCESS(addSparse(tmpsend, tmprecv, tmpadd, sendNonzeroCount,
+                                    recvNonzeroCount, totalNonzeroCount, datatype));
+        tmpswap = tmpadd;
+        tmpadd = tmpsend;
+        tmpsend = tmpswap;
+        sendNonzeroCount = totalNonzeroCount;
+        resultBuf = tmpsend;
+    }
+
+    /* Handle non-power-of-two case:
+       - Odd ranks less than 2 * extra_ranks send result from tmpsend to
+       (rank - 1)
+       - Even ranks less than 2 * extra_ranks receive result from (rank + 1)
+    */
+    if (rank < (2 * extra_ranks)) {
+        if (0 == (rank & 1)) {
+            CHECK_SMPI_SUCCESS(MPI_Recv(&recvNonzeroCount, 1, MPI_INT, (rank + 1),
+                                    TAG_ALLREDUCE_SPARSE, comm, MPI_STATUS_IGNORE));
+            CHECK_SMPI_SUCCESS(MPI_Recv(tmpsend, recvNonzeroCount * 2, datatype, (rank + 1),
+                                    TAG_ALLREDUCE_SPARSE, comm, MPI_STATUS_IGNORE));
+            resultBuf = tmpsend;
+            retTotalNonzeroCount = recvNonzeroCount;
+            return MPI_SUCCESS;
+        } else {
+            CHECK_SMPI_SUCCESS(MPI_Send(&sendNonzeroCount, 1, MPI_INT, (rank - 1),
+                                        TAG_ALLREDUCE_SPARSE, comm));
+            CHECK_SMPI_SUCCESS(MPI_Send(tmpsend, sendNonzeroCount * 2, datatype, (rank - 1),
+                                        TAG_ALLREDUCE_SPARSE, comm));
+            resultBuf = tmpsend;
+            retTotalNonzeroCount = sendNonzeroCount;
+            return MPI_SUCCESS;
+        }
+    }
+    retTotalNonzeroCount = sendNonzeroCount;
+    return MPI_SUCCESS;
+}
+
+void printComp(const void* tmp, int count)
+{
+    const CompressFormat* buf = (const CompressFormat*) tmp;
+    for (int i = 0; i < count; ++i)
+        printf("%d %.1f   ", buf[i].index, buf[i].value);
+    printf("\n");
+}
+
 
 /*
  * Adapted from OpenMPI: openmpi-4.0.0/ompi/mca/coll/base/coll_base_allreduce.c: ompi_coll_base_allreduce_intra_recursivedoubling.
@@ -225,9 +343,8 @@ int MPI_Allreduce_Sparse(const void *sbuf, void *rbuf, int count, const int nonz
         return MPI_ERR_UNKNOWN;
     }
 
-    int rank, size, adjsize, remote, distance;
-    int newrank, newremote, extra_ranks;
-    char *tmpsend = NULL, *tmprecv = NULL, *tmpswap = NULL, *inplacebuf_free = NULL;
+    int rank, size;
+    char *inplacebuf_free = NULL;
 
     MPI_Comm_size(comm, &size);
     MPI_Comm_rank(comm, &rank);
@@ -247,8 +364,11 @@ int MPI_Allreduce_Sparse(const void *sbuf, void *rbuf, int count, const int nonz
     // TODO : use faster allocator
     inplacebuf_free = (char*) mallocAlign((sizeof(int) + getDataSize(datatype)) * nonzeroCount * size, sizeof(unsigned int));
     // Used for the addition of two buf.
-    char* tmp_buf = (char*) mallocAlign((sizeof(int) + getDataSize(datatype)) * nonzeroCount * size, sizeof(unsigned int));
-    if (NULL == inplacebuf_free || NULL == tmp_buf)
+    bool useSmartnic = mainProc.havePeer();
+    char* tmp_buf;
+    if (!useSmartnic)
+        tmp_buf = (char*) mallocAlign((sizeof(int) + getDataSize(datatype)) * nonzeroCount * size, sizeof(unsigned int));
+    if (NULL == inplacebuf_free || (!useSmartnic && NULL == tmp_buf))
     {
         printf("SMPI mallocAlign failed\n");
         return MPI_ERR_UNKNOWN;
@@ -258,101 +378,23 @@ int MPI_Allreduce_Sparse(const void *sbuf, void *rbuf, int count, const int nonz
     else
         CHECK_SMPI_SUCCESS(compress(sbuf, inplacebuf_free, datatype, count, nonzeroCount));
 
-    tmpsend = (char*) inplacebuf_free;
-    tmprecv = (char*) rbuf;
-    char* tmpadd = tmp_buf;
-
-    adjsize = nextPowerOfTwoGT(size);
-    /* Determine nearest power of two less than or equal to size */
-    adjsize >>= 1;
-
-    /* Handle non-power-of-two case:
-       - Even ranks less than 2 * extra_ranks send their data to (rank + 1), and
-       sets new rank to -1.
-       - Odd ranks less than 2 * extra_ranks receive data from (rank - 1),
-       apply appropriate operation, and set new rank to rank/2
-       - Everyone else sets rank to rank - extra_ranks
-    */
-    extra_ranks = size - adjsize;
-    int recvNonzeroCount, sendNonzeroCount = nonzeroCount;
-    if (rank <  (2 * extra_ranks)) {
-        if (0 == (rank & 1)) {
-            // TODO : Combine these two MPI_Send.
-            CHECK_SMPI_SUCCESS(MPI_Send(&sendNonzeroCount, 1, MPI_INT, (rank + 1),
-                                        TAG_ALLREDUCE_SPARSE, comm));
-            CHECK_SMPI_SUCCESS(MPI_Send(tmpsend, sendNonzeroCount * 2, datatype, (rank + 1),
-                                        TAG_ALLREDUCE_SPARSE, comm));
-            newrank = -1;
-        } else {
-            CHECK_SMPI_SUCCESS(MPI_Recv(&recvNonzeroCount, 1, MPI_INT, (rank - 1),
-                                    TAG_ALLREDUCE_SPARSE, comm, MPI_STATUS_IGNORE));
-            CHECK_SMPI_SUCCESS(MPI_Recv(tmprecv, recvNonzeroCount * 2, datatype, (rank - 1),
-                                    TAG_ALLREDUCE_SPARSE, comm, MPI_STATUS_IGNORE));
-            /* tmpsend = tmprecv (op) tmpsend */
-            int totalNonzeroCount;
-            CHECK_SMPI_SUCCESS(addSparse(tmpsend, tmprecv, tmpadd, sendNonzeroCount,
-                                        recvNonzeroCount, totalNonzeroCount, datatype));
-            tmpswap = tmpadd;
-            tmpadd = tmpsend;
-            tmpsend = tmpswap;
-            sendNonzeroCount = totalNonzeroCount;
-            newrank = rank >> 1;
-        }
-    } else {
-        newrank = rank - extra_ranks;
-    }
-
-    /* Communication/Computation loop
-       - Exchange message with remote node.
-       - Perform appropriate operation taking in account order of operations:
-       result = value (op) result
-    */
-    for (distance = 0x1; distance < adjsize; distance <<= 1) {
-        if (newrank < 0) break;
-        /* Determine remote node */
-        newremote = newrank ^ distance;
-        remote = (newremote < extra_ranks)?
-            (newremote * 2 + 1):(newremote + extra_ranks);
-
-        /* Exchange the data */
-        CHECK_SMPI_SUCCESS(sendrecv(tmpsend, sendNonzeroCount, tmprecv, recvNonzeroCount,
-                                    rank, remote, TAG_ALLREDUCE_SPARSE, datatype, comm));
-        
-        int totalNonzeroCount;
-        CHECK_SMPI_SUCCESS(addSparse(tmpsend, tmprecv, tmpadd, sendNonzeroCount,
-                                    recvNonzeroCount, totalNonzeroCount, datatype));
-        tmpswap = tmpadd;
-        tmpadd = tmpsend;
-        tmpsend = tmpswap;
-        sendNonzeroCount = totalNonzeroCount;
-    }
-
-    /* Handle non-power-of-two case:
-       - Odd ranks less than 2 * extra_ranks send result from tmpsend to
-       (rank - 1)
-       - Even ranks less than 2 * extra_ranks receive result from (rank + 1)
-    */
-    if (rank < (2 * extra_ranks)) {
-        if (0 == (rank & 1)) {
-            CHECK_SMPI_SUCCESS(MPI_Recv(&recvNonzeroCount, 1, MPI_INT, (rank + 1),
-                                    TAG_ALLREDUCE_SPARSE, comm, MPI_STATUS_IGNORE));
-            CHECK_SMPI_SUCCESS(MPI_Recv(tmpadd, recvNonzeroCount * 2, datatype, (rank + 1),
-                                    TAG_ALLREDUCE_SPARSE, comm, MPI_STATUS_IGNORE));
-            CHECK_SMPI_SUCCESS(decompress(tmpadd, rbuf, datatype, count, recvNonzeroCount));
-        } else {
-            CHECK_SMPI_SUCCESS(MPI_Send(&sendNonzeroCount, 1, MPI_INT, (rank - 1),
-                                        TAG_ALLREDUCE_SPARSE, comm));
-            CHECK_SMPI_SUCCESS(MPI_Send(tmpsend, sendNonzeroCount * 2, datatype, (rank - 1),
-                                        TAG_ALLREDUCE_SPARSE, comm));
-            CHECK_SMPI_SUCCESS(decompress(tmpsend, rbuf, datatype, count, sendNonzeroCount));
-        }
+    int totalNonzeroCount;
+    char* resultBuf;
+    if (useSmartnic)
+    {
+        CHECK_SMPI_SUCCESS(MPI_Send(&nonzeroCount, 1, MPI_INT, rank, TAG_HOST_SMARTNIC, comm));
+        CHECK_SMPI_SUCCESS(MPI_Send(inplacebuf_free, nonzeroCount * 2, datatype, rank, TAG_HOST_SMARTNIC, comm));
+        CHECK_SMPI_SUCCESS(MPI_Recv(&totalNonzeroCount, 1, MPI_INT, rank, TAG_HOST_SMARTNIC, comm, MPI_STATUS_IGNORE));
+        CHECK_SMPI_SUCCESS(MPI_Recv(inplacebuf_free, totalNonzeroCount * 2, datatype, rank, TAG_HOST_SMARTNIC, comm, MPI_STATUS_IGNORE));
+        resultBuf = inplacebuf_free;
     }
     else
     {
-        CHECK_SMPI_SUCCESS(decompress(tmpsend, rbuf, datatype, count, sendNonzeroCount));
+        CHECK_SMPI_SUCCESS(allreduceSparse(inplacebuf_free, (char*)rbuf, tmp_buf, size, rank, nonzeroCount, datatype, comm, resultBuf, totalNonzeroCount));
     }
-    
+    CHECK_SMPI_SUCCESS(decompress(resultBuf, rbuf, datatype, count, totalNonzeroCount));
     freeAlign(inplacebuf_free);
-    freeAlign(tmp_buf);
+    if (!useSmartnic)
+        freeAlign(tmp_buf);
     return MPI_SUCCESS;
 }

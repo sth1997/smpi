@@ -9,6 +9,7 @@
 #include <cstring>
 #include <mpi.h>
 #include <netinet/tcp.h>
+#include <common.h>
 
 #define MAX_RECV_LEN 4096
 #define MAX_SEND_LEN 4096
@@ -17,11 +18,7 @@ MainProc mainProc;
 
 Proc::~Proc()
 {
-    if (fd != -1)
-    {
-        close(fd);
-        fd = -1;
-    }
+    this->clear();
 }
 
 void Proc::clear()
@@ -31,6 +28,11 @@ void Proc::clear()
         close(fd);
         fd = -1;
     }
+}
+
+MainProc::~MainProc()
+{
+    this->clear();
 }
 
 void MainProc::setup(int port)
@@ -140,8 +142,18 @@ void MainProc::connectToServer(const std::string& server, int port, int serverRa
         return;
     }
 
-    //Use emplace_back to avoid copy constructor.
-    this->others.emplace_back(serverRank, sockfd, serverIsHost);
+    if (serverRank == myRank)
+    {
+        peer.setFd(sockfd);
+        peer.setIsHost(serverIsHost);
+        peer.setRank(serverRank);
+    }
+    else
+    {
+        //Use emplace_back to avoid copy constructor.
+        this->others.emplace_back(serverRank, sockfd, serverIsHost);
+    }
+    
     printf("%d connect with %d\n", myRank, serverRank);
 }
 
@@ -231,6 +243,11 @@ ssize_t MainProc::recvBytes(void* buf, size_t len, int peerRank) const
 
 void MainProc::clear()
 {
+    if (this->havePeer())
+    {
+        int tmp = -1;
+        MPI_Send(&tmp, 1, MPI_INT, this->getRank(), TAG_HOST_SMARTNIC, MPI_COMM_WORLD);
+    }
     Proc::clear();
     this->peer.clear();
     others.clear();
