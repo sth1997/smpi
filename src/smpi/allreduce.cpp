@@ -105,10 +105,30 @@ static MPI_RET_CODE addSparse(const void* src1, const void* src2, void* dst, int
         }
     
     ++i;
+    /*
+    while (index1 < nonzeroCount1 && index2 < nonzeroCount2)
+    {
+        if (cp1[index1].index != cp2[index2].index)
+        {
+            bool take1 = (cp1[index1].index < cp2[index2].index);
+            cpAdd[i++] = take1 ? cp1[index1] : cp2[index2];
+            index1 += take1;
+            index2 += 1 - take1;
+        }
+        else
+        {
+            cpAdd[i].index = cp1[index1].index;
+            cpAdd[i].value = cp1[index1++].value + cp2[index2++].value;
+            --totalNonzeroCount;
+        }
+    }
+    */
+
     if (index1 < nonzeroCount1)
         memcpy(&cpAdd[i], &cp1[index1], (sizeof(int) + getDataSize(datatype)) * (nonzeroCount1 - index1));
     else if (index2 < nonzeroCount2)
         memcpy(&cpAdd[i], &cp2[index2], (sizeof(int) + getDataSize(datatype)) * (nonzeroCount2 - index2));
+ 
     return MPI_SUCCESS;
 }
 
@@ -120,18 +140,18 @@ static MPI_RET_CODE sendrecv(const void *sendbuf, int sendNonzeroCount, void *re
     {
         CHECK_SMPI_SUCCESS(MPI_Send(&sendNonzeroCount, 1, MPI_INT, peerRank, 
                                     TAG_ALLREDUCE_SPARSE, comm));
+        CHECK_SMPI_SUCCESS(MPI_Send(sendbuf, sendNonzeroCount * 2, datatype, peerRank, tag, comm));
         CHECK_SMPI_SUCCESS(MPI_Recv(&recvNonzeroCount, 1, MPI_INT, peerRank,
                                     TAG_ALLREDUCE_SPARSE, comm, MPI_STATUS_IGNORE));
-        CHECK_SMPI_SUCCESS(MPI_Send(sendbuf, sendNonzeroCount * 2, datatype, peerRank, tag, comm));
         CHECK_SMPI_SUCCESS(MPI_Recv(recvbuf, recvNonzeroCount * 2, datatype, peerRank, tag, comm, MPI_STATUS_IGNORE));
     }
     else
     {
         CHECK_SMPI_SUCCESS(MPI_Recv(&recvNonzeroCount, 1, MPI_INT, peerRank,
                                     TAG_ALLREDUCE_SPARSE, comm, MPI_STATUS_IGNORE));
+        CHECK_SMPI_SUCCESS(MPI_Recv(recvbuf, recvNonzeroCount * 2, datatype, peerRank, tag, comm, MPI_STATUS_IGNORE));
         CHECK_SMPI_SUCCESS(MPI_Send(&sendNonzeroCount, 1, MPI_INT, peerRank, 
                                     TAG_ALLREDUCE_SPARSE, comm));
-        CHECK_SMPI_SUCCESS(MPI_Recv(recvbuf, recvNonzeroCount * 2, datatype, peerRank, tag, comm, MPI_STATUS_IGNORE));
         CHECK_SMPI_SUCCESS(MPI_Send(sendbuf, sendNonzeroCount * 2, datatype, peerRank, tag, comm));
     }
     return MPI_SUCCESS;

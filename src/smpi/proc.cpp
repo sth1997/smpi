@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <cstring>
 #include <mpi.h>
+#include <netinet/tcp.h>
 
 #define MAX_RECV_LEN 4096
 #define MAX_SEND_LEN 4096
@@ -54,6 +55,12 @@ void MainProc::setup(int port)
 		perror("setsockopt failed\n");
 		return;
 	}
+    int enable = 1;
+    if((setsockopt(listenfd, IPPROTO_TCP, TCP_NODELAY, (void*)&enable, sizeof(enable))) < 0)
+    {
+        perror("setsockopt failed\n");
+        return;
+    }
 
     if( bind(listenfd, (struct sockaddr*) &servaddr, sizeof(servaddr)) == -1)
     {
@@ -105,6 +112,13 @@ void MainProc::connectToServer(const std::string& server, int port, int serverRa
   	}
   	else
     	servaddr.sin_addr.s_addr = inet_addr(server.c_str());
+
+    int enable = 1;
+    if((setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (void*)&enable, sizeof(enable))) < 0)
+    {
+        perror("setsockopt failed\n");
+        return;
+    }
 
     while (connect(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) < 0)
     {

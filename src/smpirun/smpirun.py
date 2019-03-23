@@ -32,7 +32,7 @@ def launch_thread(ssh_cmd):
     print ssh_cmd
     os.system(ssh_cmd)
 
-def launch(hosts, exec_file, host_file):
+def launch(hosts, exec_file, host_file, otherArgs):
     pwd = os.getcwd()
     tmp_list = exec_file.split('/')
     exec_name = tmp_list[-1]
@@ -56,10 +56,10 @@ def launch(hosts, exec_file, host_file):
         print scp_cmd
         for i in range(process_num):
             ssh_cmd = 'ssh {} \'cd {}; if [ -f {} ];then \
-                        ./{} --smpirank {} --smpisize {}; \
+                        ./{} --smpirank {} --smpisize {} {}; \
                         else \
-                        {} --smpirank {} --smpisize {}; \
-                        fi\''.format(host, exec_absolute_path, exec_name, exec_name, str(rank), str(size), exec_name, str(rank), str(size))
+                        {} --smpirank {} --smpisize {} {}; \
+                        fi\''.format(host, exec_absolute_path, exec_name, exec_name, str(rank), str(size), otherArgs, exec_name, str(rank), str(size), otherArgs)
             
             t = Process(target=launch_thread, args=(ssh_cmd,))
             #t = threading.Thread(target=test_thread, args=(ssh_cmd,))
@@ -79,9 +79,14 @@ for op, value in opts:
         hostfile = value
         read_hostfile(hostfile, hosts)
 
+"""
 if len(args) != 1:
     print "We need exactly one executable file."
     usage()
     sys.exit()
-
-launch(hosts, args[0], hostfile)
+"""
+if len(args) > 1:
+    otherArgs = ' '.join(args[1:])
+else:
+    otherArgs = ''
+launch(hosts, args[0], hostfile, otherArgs)
