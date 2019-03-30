@@ -40,6 +40,10 @@ int MPI_Init(int *argc, char ***argv)
         }
         else if (strcmp((*argv)[i], "--use-smartnic") == 0)
         {
+            #ifdef BREAKDOWN_ANALYSIS
+            printf("NOT support for breakdown analysis when using smartnic now.\n");
+            return MPI_ERR_UNKNOWN;
+            #endif
             //Host
             mainProc.setIsHost(true);
             useSmartnic = true;
