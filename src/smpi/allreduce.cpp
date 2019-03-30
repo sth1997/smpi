@@ -415,6 +415,11 @@ int MPI_Allreduce_Sparse(const void *sbuf, void *rbuf, int count, const int nonz
         return MPI_ERR_UNKNOWN;
     }
 
+    compressTime = 0.0;
+    decompressTime = 0.0;
+    addSparseTime = 0.0;
+    commTime = 0.0;
+
     int rank, size;
     char *inplacebuf_free = NULL;
 
