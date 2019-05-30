@@ -81,6 +81,7 @@ static MPI_RET_CODE decompress(const void* src, void* dst, MPI_Datatype datatype
     }
 
     memset(dst, 0, getDataSize(datatype) * count);
+    printf("memsetTime = %.5f\n", get_wall_time() - start);
 
     float* dstValue = (float*) dst;
     const CompressFormat* compressed = (CompressFormat*) src;
@@ -196,6 +197,7 @@ static MPI_RET_CODE sendrecv(const void *sendbuf, int sendNonzeroCount, void *re
     }
     #ifdef BREAKDOWN_ANALYSIS
     double end = get_wall_time();
+    printf("commTime = %.5f %d %d\n", end - start, sendNonzeroCount, recvNonzeroCount);
     commTime += end - start;
     #endif
     return MPI_SUCCESS;
