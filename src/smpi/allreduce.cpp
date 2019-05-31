@@ -82,6 +82,7 @@ static MPI_RET_CODE decompress(const void* src, void* dst, MPI_Datatype datatype
         return MPI_ERR_TYPE;
     }
 
+    // TODO : use multi-thread
     memset(dst, 0, getDataSize(datatype) * count);
     #ifdef BREAKDOWN_ANALYSIS
     printf("memsetTime = %.5f\n", get_wall_time() - start);
@@ -89,7 +90,6 @@ static MPI_RET_CODE decompress(const void* src, void* dst, MPI_Datatype datatype
 
     float* dstValue = (float*) dst;
     const CompressFormat* compressed = (CompressFormat*) src;
-    // TODO : use multi-thread
     for (int i = 0; i < nonzeroCount; ++i)
         dstValue[compressed[i].index] = compressed[i].value;
     #ifdef BREAKDOWN_ANALYSIS
@@ -234,7 +234,6 @@ MPI_RET_CODE allreduceSparse(char* sbuf, char* rbuf, char* tmp_buf, int size, in
        - Everyone else sets rank to rank - extra_ranks
     */
     extra_ranks = size - adjsize;
-    printf("extra rank = %d\n", extra_ranks);
     int recvNonzeroCount, sendNonzeroCount = nonzeroCount;
     if (rank <  (2 * extra_ranks)) {
         if (0 == (rank & 1)) {
