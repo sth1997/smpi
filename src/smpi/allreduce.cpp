@@ -2,6 +2,7 @@
 #include <common.h>
 #include <limits.h>
 #include <cstring>
+#include <algorithm>
 #ifdef BREAKDOWN_ANALYSIS
 #include <time.h>
 #include <sys/time.h>
@@ -18,6 +19,7 @@ static double compressTime = 0.0;
 static double decompressTime = 0.0;
 static double addSparseTime = 0.0;
 static double commTime = 0.0;
+static double selectTime = 0.0;
 #endif
 
 struct CompressFormat
@@ -31,7 +33,7 @@ struct CompressFormat
  * Compress format: ((unsigned int) index, (datatype) val)
  * Example: (0,0,0,3,0,0,1,0,0,0,0,0,7,0,0) -> ((3,3),(6,1),(12,7))
  */
-static MPI_RET_CODE compress(const void* src, void* dst, MPI_Datatype datatype, int count, int nonzeroCount)
+static MPI_RET_CODE compress(const void* src, void* dst, const float topKVal, MPI_Datatype datatype, int count, int nonzeroCount)
 {
     #ifdef BREAKDOWN_ANALYSIS
     double start = get_wall_time();
@@ -48,7 +50,7 @@ static MPI_RET_CODE compress(const void* src, void* dst, MPI_Datatype datatype, 
     int compressNum = 0;
     // TODO : use multi-thread
     for (int index = 0; index < count; ++index)
-        if (srcValue[index] != 0.0f)
+        if (srcValue[index] >= topKVal)
         {
             compressed[compressNum].index = (unsigned int) index;
             compressed[compressNum].value = srcValue[index];
@@ -81,7 +83,9 @@ static MPI_RET_CODE decompress(const void* src, void* dst, MPI_Datatype datatype
     }
 
     memset(dst, 0, getDataSize(datatype) * count);
+    #ifdef BREAKDOWN_ANALYSIS
     printf("memsetTime = %.5f\n", get_wall_time() - start);
+    #endif
 
     float* dstValue = (float*) dst;
     const CompressFormat* compressed = (CompressFormat*) src;
@@ -349,6 +353,149 @@ void printComp(const void* tmp, int count)
     printf("\n");
 }
 
+float random_select1(float* a, int l, int r, int k)
+{
+    while (l < r)
+    {
+        float tmp = a[(l + r) >> 1];
+        a[(l + r) >> 1] = a[l];
+        a[l] = tmp;
+        float key = tmp;
+        int i = l + 1, j = r;
+        while (i <= j)
+        {
+            while (a[i] > key)
+                ++i;
+            while (a[j] < key)
+                --j;
+            if (i < j)
+            {
+                tmp = a[i];
+                a[i] = a[j];
+                a[j] = tmp;
+                ++i;
+                --j;
+            }
+            else
+                ++i;
+        }
+        a[l] = a[j];
+        a[j] = key;
+
+        int q = j;
+        int tmp_k = q - l;
+        if (tmp_k == k)
+            return a[q];
+        else if (k < tmp_k)
+            r = q - 1;
+        else
+        {
+            l = q + 1;
+            k -= tmp_k + 1;
+        }
+    }
+    return a[l];
+}
+
+float random_select2(float* a, int l, int r, int k)
+{
+    k = r - k;
+    while (l < r)
+    {
+        float tmp = a[(l + r) >> 1];
+        a[(l + r) >> 1] = a[r];
+        a[r] = tmp;
+        float key = tmp;
+        int i = l - 1;
+        for (int j = l; j < r; ++j)
+        {
+            if (a[j] <= key)
+            {
+                ++i;
+                tmp = a[i];
+                a[i] = a[j];
+                a[j] = tmp;
+            }
+        }
+        a[r] = a[i + 1];
+        a[i + 1] = key;
+
+        int q = i + 1;
+        int tmp_k = q - l;
+        if (tmp_k == k)
+            return a[q];
+        else if (k < tmp_k)
+            r = q - 1;
+        else
+        {
+            l = q + 1;
+            k -= tmp_k + 1;
+        }
+    }
+    return a[l];
+}
+
+float random_select3(float* buf, int count, int k)
+{
+    std::nth_element(buf, buf + (count - k - 1), buf + count);
+    return buf[count - k - 1];
+}
+
+float randomSelect(float* buf, int count, int k)
+{
+    //return random_select1(buf, 0, count - 1, k);
+    //return random_select2(buf, 0, count - 1, k);
+    return random_select3(buf, count, k);
+}
+
+float select(const float* buf, const int count)
+{
+    #ifdef BREAKDOWN_ANALYSIS
+    double start = get_wall_time();
+    #endif
+    // TODO : try to merge some sample buffers into one buffer
+    
+    // sample buf[0~sampleCount-1]
+    int sampleCount = count / 100;
+    
+    static int times = 0;
+    ++times;
+    static float* tmpBuf;
+    if (times == 1)
+        // NOTE sampleCount * 10 * sizeof(float). The code "tmpBuf[index++]" may cause some error if we just alloc sampleCount*sizeof(float).
+        tmpBuf = (float*) mallocAlign(sampleCount * 10 * sizeof(float), 4);
+    float tmpKVal;
+    bool sampleFailed = true;
+    float ratio = 5.0f / 1000;
+    while (sampleFailed)
+    {
+        memcpy(tmpBuf, buf, sampleCount * sizeof(float));
+        tmpKVal = randomSelect(tmpBuf, sampleCount, sampleCount * ratio - 1);
+        int index = 0;
+        // TODO : use multi-thread
+        for (int i = 0; i < count; ++i)
+            // do NOT set a[i]=0 if a[i] < tmpKVal
+            if (buf[i] >= tmpKVal)
+                tmpBuf[index++] = buf[i];
+        printf("tmpKval = %.5f index = %d  count = %d\n", tmpKVal, index, count);
+        if (index > sampleCount * 10)
+        {
+            printf("Index is too large! May cause buffer overflow error!");
+            std::abort();
+        }
+        if (index < count / 1000)
+        {
+            sampleFailed = true;
+            ratio *= 2.0f;
+            continue;
+        }
+        float ret =  randomSelect(tmpBuf, index, count / 1000 - 1);
+        #ifdef BREAKDOWN_ANALYSIS
+        selectTime = get_wall_time() - start;
+        #endif
+        return ret;
+    }
+}
 
 /*
  * Adapted from OpenMPI: openmpi-4.0.0/ompi/mca/coll/base/coll_base_allreduce.c: ompi_coll_base_allreduce_intra_recursivedoubling.
@@ -391,7 +538,7 @@ void printComp(const void* tmp, int count)
  *              [6   ] [6   ] [6   ]  [6   ] [6   ]  [6   ] [6   ]
  *
  */
-int MPI_Allreduce_Sparse(const void *sbuf, void *rbuf, int count, const int nonzeroCount, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm)
+int MPI_Allreduce_Sparse(const void *sbuf, void *rbuf, int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm)
 {
     int rc;
     CHECK_SMPI_SUCCESS(checkInit());
@@ -411,16 +558,13 @@ int MPI_Allreduce_Sparse(const void *sbuf, void *rbuf, int count, const int nonz
         return MPI_ERR_OP;
     }
 
-    if (count / nonzeroCount < 100)
-    {
-        printf("SMPI MPI_Allreduce_Sparse only supports sparsity ratio < 0.01!\n");
-        return MPI_ERR_UNKNOWN;
-    }
-
+    #ifdef BREAKDOWN_ANALYSIS
     compressTime = 0.0;
     decompressTime = 0.0;
     addSparseTime = 0.0;
     commTime = 0.0;
+    selectTime = 0.0;
+    #endif
 
     int rank, size;
     char *inplacebuf_free = NULL;
@@ -437,6 +581,13 @@ int MPI_Allreduce_Sparse(const void *sbuf, void *rbuf, int count, const int nonz
         return MPI_SUCCESS;
     }
 
+    float topKVal;
+    if (MPI_IN_PLACE == sbuf)
+        topKVal = select((float*) rbuf, count);
+    else
+        topKVal = select((float*) sbuf, count);
+
+    const int nonzeroCount = count / 1000;
     /* Allocate and initialize temporary send buffer */
     // Now, we assume nonzeroCount in every process is the same.
     // TODO : Use Allreduce to calculate the total number of nonzeroCount
@@ -453,9 +604,9 @@ int MPI_Allreduce_Sparse(const void *sbuf, void *rbuf, int count, const int nonz
         return MPI_ERR_UNKNOWN;
     }
     if (MPI_IN_PLACE == sbuf)
-        CHECK_SMPI_SUCCESS(compress(rbuf, inplacebuf_free, datatype, count, nonzeroCount));
+        CHECK_SMPI_SUCCESS(compress(rbuf, inplacebuf_free, topKVal, datatype, count, nonzeroCount));
     else
-        CHECK_SMPI_SUCCESS(compress(sbuf, inplacebuf_free, datatype, count, nonzeroCount));
+        CHECK_SMPI_SUCCESS(compress(sbuf, inplacebuf_free, topKVal, datatype, count, nonzeroCount));
 
     int totalNonzeroCount;
     char* resultBuf;
@@ -479,6 +630,7 @@ int MPI_Allreduce_Sparse(const void *sbuf, void *rbuf, int count, const int nonz
     #ifdef BREAKDOWN_ANALYSIS
     printf("compressTime = %.5f\n", compressTime);
     printf("decompressTime = %.5f\n", decompressTime);
+    printf("selectTime = %.5f\n", selectTime);
     printf("addSparseTime = %.5f\n", addSparseTime);
     printf("commTime = %.5f\n", commTime);
     #endif

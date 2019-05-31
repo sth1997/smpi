@@ -1,4 +1,2 @@
-localhost slots=1 smartnic=localhost
-localhost slots=1 smartnic=localhost
-localhost slots=1 smartnic=localhost
-localhost slots=1 smartnic=localhost
+localhost slots=1
+localhost slots=1

@@ -41,7 +41,7 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, M
 
 int MPI_Barrier(MPI_Comm comm);
 
-int MPI_Allreduce_Sparse(const void *sendbuf, void *recvbuf, int count, const int nonzeroCount, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm);
+int MPI_Allreduce_Sparse(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm);
 
 typedef int MPI_RET_CODE;
 
