@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <cstring>
 #include <algorithm>
+#include <omp.h>
 #ifdef BREAKDOWN_ANALYSIS
 #include <time.h>
 #include <sys/time.h>
@@ -70,6 +71,21 @@ static MPI_RET_CODE compress(const void* src, void* dst, const float topKVal, MP
     return MPI_SUCCESS;
 }
 
+void multi_thread_memset(void* dst, int val, size_t size)
+{
+    int my_rank = omp_get_thread_num();
+    int thread_count = omp_get_num_threads();
+    size_t size_per_thread = size / thread_count;
+    char* startAddr = ((char*) dst) + size_per_thread * my_rank;
+    if (my_rank != thread_count - 1)
+        memset(startAddr, val, size_per_thread);
+    else
+    {
+        size_t tmpSize = size - size_per_thread * my_rank;
+        memset(startAddr, val, tmpSize);
+    }
+}
+
 static MPI_RET_CODE decompress(const void* src, void* dst, MPI_Datatype datatype, int count, int nonzeroCount)
 {
     #ifdef BREAKDOWN_ANALYSIS
@@ -83,7 +99,14 @@ static MPI_RET_CODE decompress(const void* src, void* dst, MPI_Datatype datatype
     }
 
     // TODO : use multi-thread
-    memset(dst, 0, getDataSize(datatype) * count);
+    //memset(dst, 0, getDataSize(datatype) * count);
+    int threadNum;
+    if (count > 512 * 1024 * 1024)
+        threadNum = 16;
+    else
+        threadNum = 8;
+    #pragma omp parallel num_threads(threadNum)
+    multi_thread_memset(dst, 0, sizeof(float) * count);
     #ifdef BREAKDOWN_ANALYSIS
     printf("memsetTime = %.5f\n", get_wall_time() - start);
     #endif
