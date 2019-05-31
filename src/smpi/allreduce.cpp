@@ -539,6 +539,11 @@ float select(const float* buf, const int count)
  */
 int MPI_Allreduce_Sparse(const void *sbuf, void *rbuf, int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm)
 {
+    #ifndef _OPENMP
+        printf("OpenMP not supported.\n");
+        printf("Add support for OpenMP or use single-thread version.\n");
+        std::abort();
+    #endif
     int rc;
     CHECK_SMPI_SUCCESS(checkInit());
     CHECK_SMPI_SUCCESS(checkPointerNotNULL(sbuf));
