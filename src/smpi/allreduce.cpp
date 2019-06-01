@@ -489,7 +489,7 @@ float select(const float* buf, const int count)
         float** tmpbuf_thread;
         *tmpbuf_thread = (float**)malloc(sizeof(float*) * thread_count);
         for(int i = 0; i < thread_countl i++)
-            tmpbuf_thread = (float*)malloc(sizeof(float) * count / thread_count);
+            tmpbuf_thread[i] = (float*)malloc(sizeof(float) * count / thread_count);
         #pragma omp parallel num_threads(thread_count)
         {
             int rank = omp_get_thread_num() + 1;
