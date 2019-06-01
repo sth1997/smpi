@@ -470,12 +470,47 @@ float select(const float* buf, const int count)
     {
         memcpy(tmpBuf, buf, sampleCount * sizeof(float));
         tmpKVal = randomSelect(tmpBuf, sampleCount, sampleCount * ratio - 1);
-        int index = 0;
+        //int index = 0;
+
+        /*
         // TODO : use multi-thread
         for (int i = 0; i < count; ++i)
             // do NOT set a[i]=0 if a[i] < tmpKVal
             if (buf[i] >= tmpKVal)
                 tmpBuf[index++] = buf[i];
+        */
+
+
+        //chw multi-thread
+        int thread_count = 2;
+        /*float** tmpbuf_thread = new float*[thread_count];
+        for(int i = 0; i < thread_count; i++)
+            *tmpbuf_thread = new float[count / thread_count];*/
+        float** tmpbuf_thread;
+        *tmpbuf_thread = (float**)malloc(sizeof(float*) * thread_count);
+        for(int i = 0; i < thread_countl i++)
+            tmpbuf_thread = (float*)malloc(sizeof(float) * count / thread_count);
+        #pragma omp parallel num_threads(thread_count)
+        {
+            int rank = omp_get_thread_num() + 1;
+            int size = omp_get_num_threads();
+            memset(tmpbuf_thread[rank - 1], 0, sizeof(float) * count / thread_count);
+            int thread_index = 0;
+            for(int i = (rank - 1) * count / size; i < rank * count / size; i++)
+            {
+                if(buf[i] >= tmpKVal)
+                    tmpbuf_thread[rank - 1][thread_index++] = buf[i];
+            }
+        }
+        //merge
+        int index = 0;
+        for(int i = 0; i < thread_count; i++)
+        {
+            for(int j = 0; tmpbuf_thread[i][j] != 0 && j < count / thread_count; j++)
+                tmpBuf[index++] = tmpbuf_thread[i][j];
+        }
+
+
         printf("tmpKval = %.5f index = %d  count = %d\n", tmpKVal, index, count);
         if (index > sampleCount * 10)
         {
