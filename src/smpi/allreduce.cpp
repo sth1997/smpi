@@ -457,13 +457,21 @@ float select(const float* buf, const int count)
     
     // sample buf[0~sampleCount-1]
     int sampleCount = count / 100;
+    int thread_count = 16;
     
     static int times = 0;
     ++times;
     static float* tmpBuf;
+    static float** tmpbuf_thread;
     if (times == 1)
+    {
         // NOTE sampleCount * 10 * sizeof(float). The code "tmpBuf[index++]" may cause some error if we just alloc sampleCount*sizeof(float).
         tmpBuf = (float*) mallocAlign(sampleCount * 10 * sizeof(float), 4);
+        tmpbuf_thread = (float**) malloc(thread_count * sizeof(float*));
+        for(int i = 0; i < thread_count; ++i)
+            tmpbuf_thread[i] = (float*)malloc(count / thread_count * sizeof(float));
+    }
+ 
     float tmpKVal;
     bool sampleFailed = true;
     float ratio = 5.0f / 1000;
@@ -482,39 +490,39 @@ float select(const float* buf, const int count)
         */
 
 
-        //chw multi-thread
-        int thread_count = 8;
-	printf("thread_count is %d\n", thread_count);
-        /*float** tmpbuf_thread = new float*[thread_count];
-        for(int i = 0; i < thread_count; i++)
-            *tmpbuf_thread = new float[count / thread_count];*/
-	float** tmpbuf_thread;
-	tmpbuf_thread = (float**) malloc(thread_count * sizeof(float*));
-	for(int i = 0; i < thread_count; i++)
-		tmpbuf_thread[i] = (float*)malloc(count / thread_count * sizeof(float));
-	printf("malloc ok\n");
+        int* threadIdx = (int*) malloc(thread_count * sizeof(int));
+        double start2 = get_wall_time();
         #pragma omp parallel num_threads(thread_count)
         {
             int rank = omp_get_thread_num() + 1;
             int size = omp_get_num_threads();
-	    printf("rank is %d, size is %d", rank, size);
-            memset(tmpbuf_thread[rank - 1], 0, sizeof(float) * count / thread_count);
             int thread_index = 0;
-            for(int i = (rank - 1) * count / size; i < rank * count / size; i++)
+            int endIdx = rank * (count / size);
+            if (rank == size)
+                endIdx = count;
+            float tmpKValLocal = tmpKVal;
+            float* tmpBufLocal = tmpbuf_thread[rank - 1];
+            for(int i = (rank - 1) * (count / size); i < endIdx; ++i)
             {
-                if(buf[i] >= tmpKVal)
-                    tmpbuf_thread[rank - 1][thread_index++] = buf[i];
+                if(buf[i] >= tmpKValLocal)
+                    tmpBufLocal[thread_index++] = buf[i];
+                    //tmpbuf_thread[rank - 1][thread_index++] = buf[i];
             }
+            // avoid false sharing
+            threadIdx[rank - 1] = thread_index;
         }
+        printf("parallelTime = %.5f\n", get_wall_time() - start2);
         //merge
 
         int index = 0;
-        for(int i = 0; i < thread_count; i++)
+        for(int i = 0; i < thread_count; ++i)
         {
-            for(int j = 0; tmpbuf_thread[i][j] != 0 && j < count / thread_count; j++)
-                tmpBuf[index++] = tmpbuf_thread[i][j];
+            //for(int j = 0; tmpbuf_thread[i][j] != 0 && j < count / thread_count; j++)
+            //    tmpBuf[index++] = tmpbuf_thread[i][j];
+            memcpy(tmpBuf + index, tmpbuf_thread[i], threadIdx[i] * sizeof(float));
+            index += threadIdx[i];
         }
-
+        free(threadIdx);
 
         printf("tmpKval = %.5f index = %d  count = %d\n", tmpKVal, index, count);
         if (index > sampleCount * 10)
