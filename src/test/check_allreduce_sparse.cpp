@@ -21,7 +21,7 @@ int main(int argc, char* argv[])
     int count;
     if (rank == 0)
     {
-        if (!freopen("/home/sth/smpi/smpi/src/test/check_allreduce_sparse1.input", "r", stdin))
+        if (!freopen("/home/chw/chw_lab/smpi/src/test/check_allreduce_sparse1.input", "r", stdin))
         {
             printf("Can't open file!!!\n");
             std::abort();
@@ -35,7 +35,7 @@ int main(int argc, char* argv[])
     }
     else
     {
-        if(!freopen("/home/sth/smpi/smpi/src/test/check_allreduce_sparse2.input", "r", stdin))
+        if(!freopen("/home/chw/chw_lab/smpi/src/test/check_allreduce_sparse2.input", "r", stdin))
         {
             printf("Can't open file!!!\n");
             printf("Please change the file path to absolute path.");
@@ -50,7 +50,7 @@ int main(int argc, char* argv[])
     }
     int rc = MPI_Allreduce_Sparse(MPI_IN_PLACE, a, count, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
     float* b = new float[count];
-    if (!freopen("/home/sth/smpi/smpi/src/test/check_allreduce_sparse.output", "r", stdin))
+    if (!freopen("/home/chw/chw_lab/smpi/src/test/check_allreduce_sparse.output", "r", stdin))
     {
         printf("Can't open file!!!\n");
         printf("Please change the file path to absolute path.");
