@@ -3,7 +3,6 @@
 #include <limits.h>
 #include <cstring>
 #include <algorithm>
-#include <omp.h>
 #ifdef BREAKDOWN_ANALYSIS
 #include <time.h>
 #include <sys/time.h>
@@ -71,21 +70,6 @@ static MPI_RET_CODE compress(const void* src, void* dst, const float topKVal, MP
     return MPI_SUCCESS;
 }
 
-void multi_thread_memset(void* dst, int val, size_t size)
-{
-    int my_rank = omp_get_thread_num();
-    int thread_count = omp_get_num_threads();
-    size_t size_per_thread = size / thread_count;
-    char* startAddr = ((char*) dst) + size_per_thread * my_rank;
-    if (my_rank != thread_count - 1)
-        memset(startAddr, val, size_per_thread);
-    else
-    {
-        size_t tmpSize = size - size_per_thread * my_rank;
-        memset(startAddr, val, tmpSize);
-    }
-}
-
 static MPI_RET_CODE decompress(const void* src, void* dst, MPI_Datatype datatype, int count, int nonzeroCount)
 {
     #ifdef BREAKDOWN_ANALYSIS
@@ -99,14 +83,7 @@ static MPI_RET_CODE decompress(const void* src, void* dst, MPI_Datatype datatype
     }
 
     // TODO : use multi-thread
-    //memset(dst, 0, getDataSize(datatype) * count);
-    int threadNum;
-    if (count > 512 * 1024 * 1024)
-        threadNum = 16;
-    else
-        threadNum = 8;
-    #pragma omp parallel num_threads(threadNum)
-    multi_thread_memset(dst, 0, sizeof(float) * count);
+    memset(dst, 0, getDataSize(datatype) * count);
     #ifdef BREAKDOWN_ANALYSIS
     printf("memsetTime = %.5f\n", get_wall_time() - start);
     #endif
@@ -494,11 +471,42 @@ float select(const float* buf, const int count)
         memcpy(tmpBuf, buf, sampleCount * sizeof(float));
         tmpKVal = randomSelect(tmpBuf, sampleCount, sampleCount * ratio - 1);
         int index = 0;
+
+        /*
         // TODO : use multi-thread
         for (int i = 0; i < count; ++i)
             // do NOT set a[i]=0 if a[i] < tmpKVal
             if (buf[i] >= tmpKVal)
                 tmpBuf[index++] = buf[i];
+        */
+
+
+        //chw multi-thread
+        int thread_count = 2;
+        float** tmpbuf_thread = new float[thread_count];
+        for(int i = 0; i < thread_count; i++)
+            *tmpbuf_thread = new float[count / thread_count];
+        #pragma omp parallel num_threads(thread_count);
+        {
+            int rank = omp_get_thread_num() + 1;
+            int size = omp_get_num_threads();
+            memset(tmpbuf_thread[rank - 1], 0, sizeof(float) * count / thread_count);
+            int index = 0;
+            for(int i = (rank - 1) * count / size; i < rank * count / size; i++)
+            {
+                if(buf[i] >= tmpKVal)
+                    tmpbuf_thread[rank - 1][index++] = buf[i];
+            }
+        }
+        //merge
+        int index = 0;
+        for(int i = 0; i < count / thread_count; i++)
+        {
+            for(int j = 0; tmpbuf_thread[i][j] != 0; j++)
+                tmpBuf[index++] = tmpbuf_thread[i][j];
+        }
+
+
         printf("tmpKval = %.5f index = %d  count = %d\n", tmpKVal, index, count);
         if (index > sampleCount * 10)
         {
@@ -562,11 +570,6 @@ float select(const float* buf, const int count)
  */
 int MPI_Allreduce_Sparse(const void *sbuf, void *rbuf, int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm)
 {
-    #ifndef _OPENMP
-        printf("OpenMP not supported.\n");
-        printf("Add support for OpenMP or use single-thread version.\n");
-        std::abort();
-    #endif
     int rc;
     CHECK_SMPI_SUCCESS(checkInit());
     CHECK_SMPI_SUCCESS(checkPointerNotNULL(sbuf));
