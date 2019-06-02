@@ -34,6 +34,87 @@ struct CompressFormat
  * Compress format: ((unsigned int) index, (datatype) val)
  * Example: (0,0,0,3,0,0,1,0,0,0,0,0,7,0,0) -> ((3,3),(6,1),(12,7))
  */
+
+static MPI_RET_CODE compress(const void* src, void* dst, const float topKVal, MPI_Datatype datatype, int count, int nonzeroCount)
+{
+    #ifdef BREAKDOWN_ANALYSIS
+    double start = get_wall_time();
+    #endif
+    //Now, only supports MPI_FLOAT
+    if (datatype != MPI_FLOAT)
+    {
+        printf("SMPI compress only supports MPI_FLOAT!\n");
+        return MPI_ERR_TYPE;
+    }
+
+    float* srcValue = (float*) src;
+    CompressFormat* compressed = (CompressFormat*) dst;
+    int compressNum = 0;
+    // TODO : use multi-thread
+    /*for (int index = 0; index < count; ++index)
+        if (srcValue[index] >= topKVal)
+        {
+            compressed[compressNum].index = (unsigned int) index;
+            compressed[compressNum].value = srcValue[index];
+            if (++compressNum == nonzeroCount)
+                break;
+        }
+    */
+    //chw multi-thread
+    int threadNum = 8;
+    static unsigned int** compressIdx_thread;
+    compressIdx_thread = (unsigned int**)malloc(threadNum * sizeof(unsigned int*));
+    for(int i = 0; i < threadNum; ++i)
+        compressIdx_thread[i] = (unsigned int*)malloc(count / threadNum * sizeof(unsigned int));
+    int* threadIdx = (int*)malloc(threadNum * sizeof(int));
+    #pragma omp parallel num_threads(threadNum)
+    {
+        int rank = omp_get_thread_num() + 1;
+        int size = omp_get_num_threads();
+        int thread_index = 0;
+        int endIdx = rank * (count / size);
+        if (rank == size)
+            endIdx = count;
+        float compressKValLocal = topKVal;
+        unsigned int* compressIdxLocal = compressIdx_thread[rank - 1];
+        for(int i = (rank - 1) * (count /size); i < endIdx; ++i)
+        {
+            if(srcValue[i] >= compressKValLocal)
+                compressIdxLocal[thread_index++] = i;
+        }
+        threadIdx[rank - 1] = thread_index;
+    }
+    //merge
+    //int index = 0;
+    //int compressNum = 0;
+    for(int i = 0; i < threadNum; ++i)
+    {
+        unsigned int* compressIdx = compressIdx_thread[i];
+        for(int j = 0; j < threadIdx[i]; ++j)
+        {
+            compressed[compressNum].index = compressIdx[j];
+            compressed[compressNum].value = srcValue[compressIdx[j]];
+            if(++compressNum == nonzeroCount)
+                break;
+        }
+        if(compressNum == nonzeroCount)
+            break;
+    }
+    if (compressNum != nonzeroCount)
+    {
+        printf("nonzeroCount is not correct!\n");
+        return MPI_ERR_COUNT;
+    }
+    #ifdef BREAKDOWN_ANALYSIS
+    double end = get_wall_time();
+    compressTime = end - start;
+    #endif
+    return MPI_SUCCESS;
+}
+
+/*
+
+
 static MPI_RET_CODE compress(const void* src, void* dst, const float topKVal, MPI_Datatype datatype, int count, int nonzeroCount)
 {
     #ifdef BREAKDOWN_ANALYSIS
@@ -69,6 +150,21 @@ static MPI_RET_CODE compress(const void* src, void* dst, const float topKVal, MP
     compressTime = end - start;
     #endif
     return MPI_SUCCESS;
+}*/
+
+void multi_thread_memset(void* dst, int val, size_t size)
+{
+    int my_rank = omp_get_thread_num();
+    int thread_count = omp_get_num_threads();
+    size_t size_per_thread = size / thread_count;
+    char* startAddr = ((char*) dst) + size_per_thread * my_rank;
+    if (my_rank != thread_count - 1)
+        memset(startAddr, val, size_per_thread);
+    else
+    {
+        size_t tmpSize = size - size_per_thread * my_rank;
+        memset(startAddr, val, tmpSize);
+    }
 }
 
 static MPI_RET_CODE decompress(const void* src, void* dst, MPI_Datatype datatype, int count, int nonzeroCount)
@@ -84,7 +180,14 @@ static MPI_RET_CODE decompress(const void* src, void* dst, MPI_Datatype datatype
     }
 
     // TODO : use multi-thread
-    memset(dst, 0, getDataSize(datatype) * count);
+    //memset(dst, 0, getDataSize(datatype) * count);
+    int threadNum;
+    if (count > 512 * 1024 * 1024)
+        threadNum = 16;
+    else
+        threadNum = 8;
+    #pragma omp parallel num_threads(threadNum)
+    multi_thread_memset(dst, 0, sizeof(float) * count);
     #ifdef BREAKDOWN_ANALYSIS
     printf("memsetTime = %.5f\n", get_wall_time() - start);
     #endif
