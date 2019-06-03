@@ -51,17 +51,21 @@ static MPI_RET_CODE compress(const void* src, void* dst, const float topKVal, MP
     CompressFormat* compressed = (CompressFormat*) dst;
     int compressNum = 0;
     // TODO : use multi-thread
-    /*for (int index = 0; index < count; ++index)
-        if (srcValue[index] >= topKVal)
-        {
-            compressed[compressNum].index = (unsigned int) index;
-            compressed[compressNum].value = srcValue[index];
-            if (++compressNum == nonzeroCount)
-                break;
-        }
-    */
+    //for (int index = 0; index < count; ++index)
+       // if (srcValue[index] >= topKVal)
+        //{
+            //compressed[compressNum].index = (unsigned int) index;
+            //compressed[compressNum].value = srcValue[index];
+            //if (++compressNum == nonzeroCount)
+                //break;
+        //}
+    
     //chw multi-thread
-    int threadNum = 8;
+	int threadNum;
+	if(count < 32 * 1024 * 1024)
+    	threadNum = 8;
+	else
+		threadNum = 16;
     static unsigned int** compressIdx_thread;
     compressIdx_thread = (unsigned int**)malloc(threadNum * sizeof(unsigned int*));
     for(int i = 0; i < threadNum; ++i)
@@ -112,9 +116,9 @@ static MPI_RET_CODE compress(const void* src, void* dst, const float topKVal, MP
     return MPI_SUCCESS;
 }
 
+
+
 /*
-
-
 static MPI_RET_CODE compress(const void* src, void* dst, const float topKVal, MPI_Datatype datatype, int count, int nonzeroCount)
 {
     #ifdef BREAKDOWN_ANALYSIS
@@ -150,8 +154,8 @@ static MPI_RET_CODE compress(const void* src, void* dst, const float topKVal, MP
     compressTime = end - start;
     #endif
     return MPI_SUCCESS;
-}*/
-
+}
+*/
 void multi_thread_memset(void* dst, int val, size_t size)
 {
     int my_rank = omp_get_thread_num();
@@ -181,13 +185,24 @@ static MPI_RET_CODE decompress(const void* src, void* dst, MPI_Datatype datatype
 
     // TODO : use multi-thread
     //memset(dst, 0, getDataSize(datatype) * count);
-    int threadNum;
-    if (count > 512 * 1024 * 1024)
-        threadNum = 16;
-    else
-        threadNum = 8;
-    #pragma omp parallel num_threads(threadNum)
+
+
+    
+	
+	
+	int threadNum;
+	if (count <= 8 * 1024 * 1024)
+        threadNum = 2;
+    else if(count <= 32 * 1024 * 1024)
+        threadNum = 4;
+	else
+		threadNum = 8;
+	#pragma omp parallel num_threads(threadNum)
     multi_thread_memset(dst, 0, sizeof(float) * count);
+	
+	
+
+
     #ifdef BREAKDOWN_ANALYSIS
     printf("memsetTime = %.5f\n", get_wall_time() - start);
     #endif
@@ -248,7 +263,7 @@ static MPI_RET_CODE addSparse(const void* src1, const void* src2, void* dst, int
         }
     
     ++i;
-    /*
+   /* 
     while (index1 < nonzeroCount1 && index2 < nonzeroCount2)
     {
         if (cp1[index1].index != cp2[index2].index)
@@ -560,8 +575,13 @@ float select(const float* buf, const int count)
     
     // sample buf[0~sampleCount-1]
     int sampleCount = count / 100;
-    int thread_count = 16;
-    
+    int thread_count;
+    if(count <= 32 * 1024 * 1024)
+		thread_count = 4;
+	else if( count <= 128 * 1024 * 1024)
+		thread_count = 8;
+	else
+		thread_count = 16;
     static int times = 0;
     ++times;
     static float* tmpBuf;
@@ -582,15 +602,17 @@ float select(const float* buf, const int count)
     {
         memcpy(tmpBuf, buf, sampleCount * sizeof(float));
         tmpKVal = randomSelect(tmpBuf, sampleCount, sampleCount * ratio - 1);
-        // int index = 0;
+        //int index = 0;
 
-        /*
+        
         // TODO : use multi-thread
-        for (int i = 0; i < count; ++i)
+       /*
+		 for (int i = 0; i < count; ++i)
             // do NOT set a[i]=0 if a[i] < tmpKVal
             if (buf[i] >= tmpKVal)
                 tmpBuf[index++] = buf[i];
         */
+		
 
 
         int* threadIdx = (int*) malloc(thread_count * sizeof(int));
@@ -626,7 +648,7 @@ float select(const float* buf, const int count)
             index += threadIdx[i];
         }
         free(threadIdx);
-
+		
         printf("tmpKval = %.5f index = %d  count = %d\n", tmpKVal, index, count);
         if (index > sampleCount * 10)
         {
