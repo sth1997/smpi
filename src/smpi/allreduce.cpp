@@ -50,59 +50,63 @@ static MPI_RET_CODE compress(const void* src, void* dst, const float topKVal, MP
     float* srcValue = (float*) src;
     CompressFormat* compressed = (CompressFormat*) dst;
     int compressNum = 0;
-    // TODO : use multi-thread
-    //for (int index = 0; index < count; ++index)
-       // if (srcValue[index] >= topKVal)
-        //{
-            //compressed[compressNum].index = (unsigned int) index;
-            //compressed[compressNum].value = srcValue[index];
-            //if (++compressNum == nonzeroCount)
-                //break;
-        //}
-    
-    //chw multi-thread
-	int threadNum;
-	if(count < 32 * 1024 * 1024)
-    	threadNum = 8;
-	else
-		threadNum = 16;
-    static unsigned int** compressIdx_thread;
-    compressIdx_thread = (unsigned int**)malloc(threadNum * sizeof(unsigned int*));
-    for(int i = 0; i < threadNum; ++i)
-        compressIdx_thread[i] = (unsigned int*)malloc(count / threadNum * sizeof(unsigned int));
-    int* threadIdx = (int*)malloc(threadNum * sizeof(int));
-    #pragma omp parallel num_threads(threadNum)
+    if(count < 512 * 1024)
     {
-        int rank = omp_get_thread_num() + 1;
-        int size = omp_get_num_threads();
-        int thread_index = 0;
-        int endIdx = rank * (count / size);
-        if (rank == size)
-            endIdx = count;
-        float compressKValLocal = topKVal;
-        unsigned int* compressIdxLocal = compressIdx_thread[rank - 1];
-        for(int i = (rank - 1) * (count /size); i < endIdx; ++i)
+        for (int index = 0; index < count; ++index)
+        if (srcValue[index] >= topKVal)
         {
-            if(srcValue[i] >= compressKValLocal)
-                compressIdxLocal[thread_index++] = i;
-        }
-        threadIdx[rank - 1] = thread_index;
-    }
-    //merge
-    //int index = 0;
-    //int compressNum = 0;
-    for(int i = 0; i < threadNum; ++i)
-    {
-        unsigned int* compressIdx = compressIdx_thread[i];
-        for(int j = 0; j < threadIdx[i]; ++j)
-        {
-            compressed[compressNum].index = compressIdx[j];
-            compressed[compressNum].value = srcValue[compressIdx[j]];
-            if(++compressNum == nonzeroCount)
+            compressed[compressNum].index = (unsigned int) index;
+            compressed[compressNum].value = srcValue[index];
+            if (++compressNum == nonzeroCount)
                 break;
         }
-        if(compressNum == nonzeroCount)
-            break;
+    }
+    else        
+    //chw multi-thread
+    {
+        int threadNum;
+        if(count < 32 * 1024 * 1024)
+            threadNum = 8;
+        else
+            threadNum = 16;
+        static unsigned int** compressIdx_thread;
+        compressIdx_thread = (unsigned int**)malloc(threadNum * sizeof(unsigned int*));
+        for(int i = 0; i < threadNum; ++i)
+            compressIdx_thread[i] = (unsigned int*)malloc(count / threadNum * sizeof(unsigned int));
+        int* threadIdx = (int*)malloc(threadNum * sizeof(int));
+        #pragma omp parallel num_threads(threadNum)
+        {
+            int rank = omp_get_thread_num() + 1;
+            int size = omp_get_num_threads();
+            int thread_index = 0;
+            int endIdx = rank * (count / size);
+            if (rank == size)
+                endIdx = count;
+            float compressKValLocal = topKVal;
+            unsigned int* compressIdxLocal = compressIdx_thread[rank - 1];
+            for(int i = (rank - 1) * (count /size); i < endIdx; ++i)
+            {
+                if(srcValue[i] >= compressKValLocal)
+                    compressIdxLocal[thread_index++] = i;
+            }  
+            threadIdx[rank - 1] = thread_index;
+        }
+        //merge
+        //int index = 0;
+        //int compressNum = 0;
+        for(int i = 0; i < threadNum; ++i)
+        {
+            unsigned int* compressIdx = compressIdx_thread[i];
+            for(int j = 0; j < threadIdx[i]; ++j)
+            {
+                compressed[compressNum].index = compressIdx[j];
+                compressed[compressNum].value = srcValue[compressIdx[j]];
+                if(++compressNum == nonzeroCount)
+                    break;
+            }
+            if(compressNum == nonzeroCount)
+                break;
+        }
     }
     if (compressNum != nonzeroCount)
     {
@@ -184,25 +188,23 @@ static MPI_RET_CODE decompress(const void* src, void* dst, MPI_Datatype datatype
     }
 
     // TODO : use multi-thread
-    //memset(dst, 0, getDataSize(datatype) * count);
-
-
-    
+    if(count < 8 * 1024 * 1024)
+        memset(dst, 0, getDataSize(datatype) * count);
+    else	
+    {
+        int threadNum;
+        if(count < 32 * 1024 * 1024)
+            threadNum = 2;
+        else if(count < 128 * 1024 * 1024)
+            threadNum = 4;
+        else if(count <= 512 * 1024 * 1024)
+            threadNum = 8;
+        else
+            threadNum = 16;
+        #pragma omp parallel num_threads(threadNum)
+        multi_thread_memset(dst, 0, sizeof(float) * count);
+    }
 	
-	
-	int threadNum;
-	if (count <= 8 * 1024 * 1024)
-        threadNum = 2;
-    else if(count <= 32 * 1024 * 1024)
-        threadNum = 4;
-	else
-		threadNum = 8;
-	#pragma omp parallel num_threads(threadNum)
-    multi_thread_memset(dst, 0, sizeof(float) * count);
-	
-	
-
-
     #ifdef BREAKDOWN_ANALYSIS
     printf("memsetTime = %.5f\n", get_wall_time() - start);
     #endif
@@ -577,11 +579,11 @@ float select(const float* buf, const int count)
     int sampleCount = count / 100;
     int thread_count;
     if(count <= 32 * 1024 * 1024)
-		thread_count = 4;
-	else if( count <= 128 * 1024 * 1024)
-		thread_count = 8;
-	else
-		thread_count = 16;
+        thread_count = 4;
+    else if( count <= 128 * 1024 * 1024)
+        thread_count = 8;
+    else
+        thread_count = 16;
     static int times = 0;
     ++times;
     static float* tmpBuf;
@@ -602,53 +604,49 @@ float select(const float* buf, const int count)
     {
         memcpy(tmpBuf, buf, sampleCount * sizeof(float));
         tmpKVal = randomSelect(tmpBuf, sampleCount, sampleCount * ratio - 1);
-        //int index = 0;
-
-        
-        // TODO : use multi-thread
-       /*
-		 for (int i = 0; i < count; ++i)
+        if(count <= 4 * 1024 * 1027)
+        {
+            int index  = 0;
+		    for (int i = 0; i < count; ++i)
             // do NOT set a[i]=0 if a[i] < tmpKVal
             if (buf[i] >= tmpKVal)
                 tmpBuf[index++] = buf[i];
-        */
-		
-
-
-        int* threadIdx = (int*) malloc(thread_count * sizeof(int));
-        double start2 = get_wall_time();
-        #pragma omp parallel num_threads(thread_count)
+        }
+        else		
         {
-            int rank = omp_get_thread_num() + 1;
-            int size = omp_get_num_threads();
-            int thread_index = 0;
-            int endIdx = rank * (count / size);
-            if (rank == size)
-                endIdx = count;
-            float tmpKValLocal = tmpKVal;
-            float* tmpBufLocal = tmpbuf_thread[rank - 1];
-            for(int i = (rank - 1) * (count / size); i < endIdx; ++i)
+            int* threadIdx = (int*) malloc(thread_count * sizeof(int));
+            double start2 = get_wall_time();
+            #pragma omp parallel num_threads(thread_count)
             {
-                if(buf[i] >= tmpKValLocal)
-                    tmpBufLocal[thread_index++] = buf[i];
+                int rank = omp_get_thread_num() + 1;
+                int size = omp_get_num_threads();
+                int thread_index = 0;
+                int endIdx = rank * (count / size);
+                if (rank == size)
+                    endIdx = count;
+                float tmpKValLocal = tmpKVal;
+                float* tmpBufLocal = tmpbuf_thread[rank - 1];
+                for(int i = (rank - 1) * (count / size); i < endIdx; ++i)
+                {
+                    if(buf[i] >= tmpKValLocal)
+                        tmpBufLocal[thread_index++] = buf[i];
                     //tmpbuf_thread[rank - 1][thread_index++] = buf[i];
+                }
+                // avoid false sharing
+                threadIdx[rank - 1] = thread_index;
             }
-            // avoid false sharing
-            threadIdx[rank - 1] = thread_index;
+            printf("parallelTime = %.5f\n", get_wall_time() - start2);
+            //merge
+            int index = 0;
+            for(int i = 0; i < thread_count; ++i)
+            {
+                //for(int j = 0; tmpbuf_thread[i][j] != 0 && j < count / thread_count; j++)
+                //    tmpBuf[index++] = tmpbuf_thread[i][j];
+                memcpy(tmpBuf + index, tmpbuf_thread[i], threadIdx[i] * sizeof(float));
+                index += threadIdx[i];
+            }
+            free(threadIdx);
         }
-        printf("parallelTime = %.5f\n", get_wall_time() - start2);
-        //merge
-
-        int index = 0;
-        for(int i = 0; i < thread_count; ++i)
-        {
-            //for(int j = 0; tmpbuf_thread[i][j] != 0 && j < count / thread_count; j++)
-            //    tmpBuf[index++] = tmpbuf_thread[i][j];
-            memcpy(tmpBuf + index, tmpbuf_thread[i], threadIdx[i] * sizeof(float));
-            index += threadIdx[i];
-        }
-        free(threadIdx);
-		
         printf("tmpKval = %.5f index = %d  count = %d\n", tmpKVal, index, count);
         if (index > sampleCount * 10)
         {
