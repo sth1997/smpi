@@ -577,13 +577,6 @@ float select(const float* buf, const int count)
     
     // sample buf[0~sampleCount-1]
     int sampleCount = count / 100;
-    int thread_count;
-    if(count <= 32 * 1024 * 1024)
-        thread_count = 4;
-    else if( count <= 128 * 1024 * 1024)
-        thread_count = 8;
-    else
-        thread_count = 16;
     static int times = 0;
     ++times;
     static float* tmpBuf;
@@ -592,21 +585,18 @@ float select(const float* buf, const int count)
     {
         // NOTE sampleCount * 10 * sizeof(float). The code "tmpBuf[index++]" may cause some error if we just alloc sampleCount*sizeof(float).
         tmpBuf = (float*) mallocAlign(sampleCount * 10 * sizeof(float), 4);
-        tmpbuf_thread = (float**) malloc(thread_count * sizeof(float*));
-        for(int i = 0; i < thread_count; ++i)
-            tmpbuf_thread[i] = (float*)malloc(count / thread_count * sizeof(float));
     }
  
     float tmpKVal;
     bool sampleFailed = true;
     float ratio = 5.0f / 1000;
+    int index = 0;
     while (sampleFailed)
     {
         memcpy(tmpBuf, buf, sampleCount * sizeof(float));
         tmpKVal = randomSelect(tmpBuf, sampleCount, sampleCount * ratio - 1);
         if(count <= 4 * 1024 * 1027)
         {
-            int index  = 0;
 		    for (int i = 0; i < count; ++i)
             // do NOT set a[i]=0 if a[i] < tmpKVal
             if (buf[i] >= tmpKVal)
@@ -614,6 +604,16 @@ float select(const float* buf, const int count)
         }
         else		
         {
+            int thread_count;
+            if(count <= 32 * 1024 * 1027)
+                thread_count = 4;
+            else if(count <= 128 * 1024 * 1024)
+                thread_count = 8;
+            else
+                thread_count = 16;
+            tmpbuf_thread = (float**)malloc(thread_count * sizeof(float*));
+            for(int i = 0; i < thread_count; ++i)
+                tmpbuf_thread[i] = (float*)malloc(count / thread_count * sizeof(float));
             int* threadIdx = (int*) malloc(thread_count * sizeof(int));
             double start2 = get_wall_time();
             #pragma omp parallel num_threads(thread_count)
@@ -637,7 +637,6 @@ float select(const float* buf, const int count)
             }
             printf("parallelTime = %.5f\n", get_wall_time() - start2);
             //merge
-            int index = 0;
             for(int i = 0; i < thread_count; ++i)
             {
                 //for(int j = 0; tmpbuf_thread[i][j] != 0 && j < count / thread_count; j++)
