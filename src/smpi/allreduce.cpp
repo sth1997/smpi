@@ -65,14 +65,17 @@ static MPI_RET_CODE compress(const void* src, void* dst, const float topKVal, MP
     //chw multi-thread
     {
         int threadNum;
-        if(count < 32 * 1024 * 1024)
+        if(count <= 32 * 1024 * 1024)
             threadNum = 8;
         else
             threadNum = 16;
-        static unsigned int** compressIdx_thread;
-        compressIdx_thread = (unsigned int**)malloc(threadNum * sizeof(unsigned int*));
-        for(int i = 0; i < threadNum; ++i)
-            compressIdx_thread[i] = (unsigned int*)malloc(count / threadNum * sizeof(unsigned int));
+        static unsigned int** compressIdx_thread = NULL;
+        if (compressIdx_thread == NULL)
+        {
+            compressIdx_thread = (unsigned int**)malloc(threadNum * sizeof(unsigned int*));
+            for(int i = 0; i < threadNum; ++i)
+                compressIdx_thread[i] = (unsigned int*)malloc(count / threadNum * sizeof(unsigned int));
+        }
         int* threadIdx = (int*)malloc(threadNum * sizeof(int));
         #pragma omp parallel num_threads(threadNum)
         {
@@ -107,6 +110,7 @@ static MPI_RET_CODE compress(const void* src, void* dst, const float topKVal, MP
             if(compressNum == nonzeroCount)
                 break;
         }
+        free(threadIdx);
     }
     if (compressNum != nonzeroCount)
     {
@@ -205,10 +209,6 @@ static MPI_RET_CODE decompress(const void* src, void* dst, MPI_Datatype datatype
         multi_thread_memset(dst, 0, sizeof(float) * count);
     }
 	
-    #ifdef BREAKDOWN_ANALYSIS
-    printf("memsetTime = %.5f\n", get_wall_time() - start);
-    #endif
-
     float* dstValue = (float*) dst;
     const CompressFormat* compressed = (CompressFormat*) src;
     for (int i = 0; i < nonzeroCount; ++i)
@@ -322,7 +322,6 @@ static MPI_RET_CODE sendrecv(const void *sendbuf, int sendNonzeroCount, void *re
     }
     #ifdef BREAKDOWN_ANALYSIS
     double end = get_wall_time();
-    printf("commTime = %.5f %d %d\n", end - start, sendNonzeroCount, recvNonzeroCount);
     commTime += end - start;
     #endif
     return MPI_SUCCESS;
@@ -595,9 +594,9 @@ float select(const float* buf, const int count)
     {
         memcpy(tmpBuf, buf, sampleCount * sizeof(float));
         tmpKVal = randomSelect(tmpBuf, sampleCount, sampleCount * ratio - 1);
-        if(count <= 4 * 1024 * 1027)
+        if(count <= 4 * 1024 * 1024)
         {
-		    for (int i = 0; i < count; ++i)
+            for (int i = 0; i < count; ++i)
             // do NOT set a[i]=0 if a[i] < tmpKVal
             if (buf[i] >= tmpKVal)
                 tmpBuf[index++] = buf[i];
@@ -605,7 +604,7 @@ float select(const float* buf, const int count)
         else		
         {
             int thread_count;
-            if(count <= 32 * 1024 * 1027)
+            if(count <= 32 * 1024 * 1024)
                 thread_count = 4;
             else if(count <= 128 * 1024 * 1024)
                 thread_count = 8;
