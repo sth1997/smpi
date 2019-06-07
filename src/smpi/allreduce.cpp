@@ -576,6 +576,13 @@ float select(const float* buf, const int count)
     
     // sample buf[0~sampleCount-1]
     int sampleCount = count / 100;
+    int thread_count;
+    if(count <= 32 * 1024 * 1024)
+        thread_count = 4;
+    else if(count <= 128 * 1024 * 1024)
+        thread_count = 8;
+    else
+        thread_count = 16;
     static int times = 0;
     ++times;
     static float* tmpBuf;
@@ -584,6 +591,9 @@ float select(const float* buf, const int count)
     {
         // NOTE sampleCount * 10 * sizeof(float). The code "tmpBuf[index++]" may cause some error if we just alloc sampleCount*sizeof(float).
         tmpBuf = (float*) mallocAlign(sampleCount * 10 * sizeof(float), 4);
+        tmpbuf_thread = (float**)malloc(thread_count * sizeof(float*));
+        for(int i = 0; i < thread_count; ++i)
+            tmpbuf_thread[i] = (float*)malloc(count / thread_count * sizeof(float));
     }
  
     float tmpKVal;
@@ -603,16 +613,6 @@ float select(const float* buf, const int count)
         }
         else		
         {
-            int thread_count;
-            if(count <= 32 * 1024 * 1024)
-                thread_count = 4;
-            else if(count <= 128 * 1024 * 1024)
-                thread_count = 8;
-            else
-                thread_count = 16;
-            tmpbuf_thread = (float**)malloc(thread_count * sizeof(float*));
-            for(int i = 0; i < thread_count; ++i)
-                tmpbuf_thread[i] = (float*)malloc(count / thread_count * sizeof(float));
             int* threadIdx = (int*) malloc(thread_count * sizeof(int));
             double start2 = get_wall_time();
             #pragma omp parallel num_threads(thread_count)
